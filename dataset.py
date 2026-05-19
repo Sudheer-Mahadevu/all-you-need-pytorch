@@ -14,6 +14,13 @@ class Multi30kDataset(Dataset):
         self.dataset = load_dataset('bentrevett/multi30k', split=split)
         
         # Load spacy tokenizers for de and en
+        import sys
+        from unittest.mock import MagicMock
+        
+        # 1. Force the system to think 'google.colab' is already imported 
+        #    and points to a dummy object. This stops spacy from 
+        #    triggering the buggy import.
+        sys.modules["google.colab"] = MagicMock()
         import spacy
         self.spacy_de = spacy.blank('de')
         self.spacy_en = spacy.blank('en')

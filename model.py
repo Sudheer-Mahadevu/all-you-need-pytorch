@@ -176,7 +176,12 @@ class MultiHeadAttention(nn.Module):
         self.W_o = nn.Linear(d_model, d_model)
         
         self.dropout = nn.Dropout(p=dropout)
-    
+        # *****For wandb logging****
+        # Store the last computed attention weight tensor so experiments can
+        # inspect per-head attention maps without modifying forward signatures.
+        # Shape after a forward pass: [batch, num_heads, seq_q, seq_k]
+        # Accessed as: model.encoder.layers[-1].self_attn.attn_weights
+        self.attn_weights: Optional[torch.Tensor] = None
     def forward(
         self,
         query: torch.Tensor,
@@ -214,7 +219,8 @@ class MultiHeadAttention(nn.Module):
         V = V.view(batch_size, -1, self.num_heads, self.d_k).transpose(1, 2)
         
         # Apply scaled dot-product attention
-        attn_output, _ = scaled_dot_product_attention(Q, K, V, mask)
+        # Store attention weights for wandb logging
+        attn_output, self.attn_weights = scaled_dot_product_attention(Q, K, V, mask)
         
         # Apply dropout to attention output
         # This dropout prevents Attention Concentration or overfocus on a single
@@ -595,20 +601,15 @@ class Transformer(nn.Module):
         
 
         # Load German spaCy tokenizer
-        import spacy
-        import subprocess
         import sys
-        try:
-            self._spacy_de = spacy.load('de_core_news_sm')
-        except OSError:
-            # Use sys.executable to safely invoke the correct Python binary
-            print("downloading spacy tokenizer for german...")
-            subprocess.run(
-                [sys.executable, "-m", "spacy", "download", "de_core_news_sm"], 
-                check=True
-            )
-            self._spacy_de = spacy.load('de_core_news_sm')
-
+        from unittest.mock import MagicMock
+        
+        # 1. Force the system to think 'google.colab' is already imported 
+        #    and points to a dummy object. This stops spacy from 
+        #    triggering the buggy import.
+        sys.modules["google.colab"] = MagicMock()
+        import spacy
+        self._spacy_de = spacy.blank('de')
     
     def _init_parameters(self):
         """Initialize parameters using Xavier/Glorot initialization"""
