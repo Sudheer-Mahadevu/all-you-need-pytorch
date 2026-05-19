@@ -646,7 +646,7 @@ if __name__ == "__main__":
         'smoothing': 0.1,
         'learning_rate': 1.0,  # Base LR for Noam scheduler\
         'run_name' : "trial_run",
-        'is_background': True
+        'is_background': False
     }
 
     import wandb

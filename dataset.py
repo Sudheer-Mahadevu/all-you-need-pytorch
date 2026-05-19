@@ -15,16 +15,8 @@ class Multi30kDataset(Dataset):
         
         # Load spacy tokenizers for de and en
         import spacy
-        try:
-            self.spacy_de = spacy.load('de_core_news_sm')
-            self.spacy_en = spacy.load('en_core_web_sm')
-        except OSError:
-            # If models aren't installed, download them
-            import subprocess
-            subprocess.run(['python', '-m', 'spacy', 'download', 'de_core_news_sm'])
-            subprocess.run(['python', '-m', 'spacy', 'download', 'en_core_web_sm'])
-            self.spacy_de = spacy.load('de_core_news_sm')
-            self.spacy_en = spacy.load('en_core_web_sm')
+        self.spacy_de = spacy.blank('de')
+        self.spacy_en = spacy.blank('en')
         
         # Special tokens
         self.PAD_IDX = 1
@@ -59,6 +51,8 @@ class Multi30kDataset(Dataset):
         tgt_counter = Counter()
         
         # Count tokens in the dataset
+        # German to English Translation is being learnt
+        # Hence, src is german and tgt is english
         for example in self.dataset:
             src_tokens = self.tokenize_de(example['de'])
             tgt_tokens = self.tokenize_en(example['en'])

@@ -537,14 +537,14 @@ class Transformer(nn.Module):
 
     def __init__(
         self,
-        src_vocab_size: int,
-        tgt_vocab_size: int,
-        d_model:   int   = 512,
-        N:         int   = 6,
+        src_vocab_size: int = 18669,
+        tgt_vocab_size: int = 9797,
+        d_model:   int   = 256,
+        N:         int   = 4,
         num_heads: int   = 8,
-        d_ff:      int   = 2048,
+        d_ff:      int   = 1024,
         dropout:   float = 0.1,
-        checkpoint_path: str = None,
+        checkpoint_path: str = "g_best_model.pt",
     ) -> None:
         super().__init__()
         self.d_model = d_model
@@ -584,15 +584,31 @@ class Transformer(nn.Module):
         
         # init should also load the model weights if checkpoint path provided, download the .pth file like this
         if checkpoint_path is not None:
-            if checkpoint_path.startswith('http') or checkpoint_path.startswith('gdrive'):
+            if not os.path.exists(checkpoint_path):
                 # Download from Google Drive
-                gdown.download(checkpoint_path, output='model_checkpoint.pth', quiet=False)
-                checkpoint_path = 'model_checkpoint.pth'
+                print("downloading the model from gdrive...")
+                gdown.download(id = "14RZsnA4XRMe16eVeK_6T9yeKnuxlKkA5", output=checkpoint_path, quiet=False)
             
-            if os.path.exists(checkpoint_path):
-                checkpoint = torch.load(checkpoint_path, map_location='cpu')
-                self.load_state_dict(checkpoint['model_state_dict'])
-                print(f"Loaded checkpoint from {checkpoint_path}")
+            checkpoint = torch.load(checkpoint_path, map_location='cpu')
+            self.load_state_dict(checkpoint['model_state_dict'])
+            print(f"Loaded checkpoint from {checkpoint_path}")
+        
+
+        # Load German spaCy tokenizer
+        import spacy
+        import subprocess
+        import sys
+        try:
+            self._spacy_de = spacy.load('de_core_news_sm')
+        except OSError:
+            # Use sys.executable to safely invoke the correct Python binary
+            print("downloading spacy tokenizer for german...")
+            subprocess.run(
+                [sys.executable, "-m", "spacy", "download", "de_core_news_sm"], 
+                check=True
+            )
+            self._spacy_de = spacy.load('de_core_news_sm')
+
     
     def _init_parameters(self):
         """Initialize parameters using Xavier/Glorot initialization"""
@@ -700,6 +716,71 @@ class Transformer(nn.Module):
         Returns:
             The fully translated English string, detokenized and clean.
         """
-        # This will be implemented in train.py using greedy_decode
-        # Placeholder for now
-        raise NotImplementedError("Use greedy_decode function from train.py")
+         # Special token indices (must match dataset.py constants)
+        PAD_IDX = 1
+        SOS_IDX = 2
+        EOS_IDX = 3
+        UNK_IDX = 0
+        MAX_LEN = 100
+ 
+        # Lazily load vocab + tokenizer; cache on self so repeated
+        #          calls to infer() don't reload the full dataset each time
+        if not hasattr(self, '_src_vocab') or self._src_vocab is None:
+            from dataset import Multi30kDataset
+ 
+            # Build vocab from the training split (same vocab used during training)
+            _ds = Multi30kDataset(split='train')
+            self._src_vocab     = _ds.src_vocab        # token  --> idx  (German)
+            self._tgt_idx2token = _ds.tgt_idx2token    # idx   --> token (English)
+
+        # Tokenise raw German text
+        tokens = [tok.text.lower() for tok in self._spacy_de.tokenizer(src_sentence)]
+ 
+        # Map tokens --> indices (unknown tokens → UNK_IDX)
+        src_indices = [self._src_vocab.get(tok, UNK_IDX) for tok in tokens]
+ 
+        # Build source tensor [1, src_len] and its mask 
+        device = next(self.parameters()).device
+        src      = torch.tensor([src_indices], dtype=torch.long, device=device)
+        src_mask = make_src_mask(src, pad_idx=PAD_IDX).to(device)
+ 
+        #  Greedy autoregressive decoding 
+        #          Logic mirrors greedy_decode() in train.py, inlined here so
+        #          infer() is fully self-contained.
+        self.eval()
+        with torch.no_grad():
+            # Encode the source sequence once
+            memory = self.encode(src, src_mask)
+ 
+            # Start with <sos>
+            ys = torch.tensor([[SOS_IDX]], dtype=torch.long, device=device)
+ 
+            for _ in range(MAX_LEN - 1):
+                tgt_mask = make_tgt_mask(ys, pad_idx=PAD_IDX).to(device)
+ 
+                # logits: [1, current_tgt_len, tgt_vocab_size]
+                logits = self.decode(memory, src_mask, ys, tgt_mask)
+ 
+                # Greedy: pick the highest-probability token at the last position
+                next_token = logits[:, -1, :].argmax(dim=-1, keepdim=True)  # [1, 1]
+                ys = torch.cat([ys, next_token], dim=1)
+ 
+                # Stop when <eos> is produced
+                if next_token.item() == EOS_IDX:
+                    break
+ 
+        # Convert predicted indices -> English tokens
+        #          Skip the leading <sos>; stop before <eos>.
+        predicted_ids = ys[0].cpu().tolist()[1:]   # drop <sos>
+        words = []
+        for idx in predicted_ids:
+            if idx == EOS_IDX:
+                break
+            words.append(self._tgt_idx2token.get(idx, '<unk>'))
+
+        translated_string = " ".join(words)
+        
+        # Replace the problematic ' .' with '.'
+        translated_string = translated_string.replace(" .", ".")
+        
+        return translated_string
