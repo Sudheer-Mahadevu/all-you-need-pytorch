@@ -554,7 +554,7 @@ def run_q22_scaling_ablation(train_ds, val_ds, test_ds, device: str) -> None:
     print("Q2.2 — Run B: WITHOUT 1/√dₖ scaling")
     print("=" * 60)
     model_b = build_standard_model(train_ds, cfg, device)
-    model_b = _swap_mha_to_unscaled(model_b)   # replace all MHA modules
+    model_b = _swap_mha_to_unscaled(model_b).to(device)   # replace all MHA modules
     train_loop(
         run_name="q22_no_scaling",
         config=dict(cfg, use_scaling=False),
@@ -618,13 +618,15 @@ def run_q23_attention_rollout(
         "Ein Mann mit einem orangefarbenen Hut schaut in die Kamera ."
     )
 
+    import sys
+    from unittest.mock import MagicMock
+        
+    # 1. Force the system to think 'google.colab' is already imported 
+    #    and points to a dummy object. This stops spacy from 
+    #    triggering the buggy import.
+    sys.modules["google.colab"] = MagicMock()
     import spacy
-    try:
-        spacy_de = spacy.load("de_core_news_sm")
-    except OSError:
-        import subprocess, sys
-        subprocess.run([sys.executable, "-m", "spacy", "download", "de_core_news_sm"], check=True)
-        spacy_de = spacy.load("de_core_news_sm")
+    spacy_de = spacy.blank('de')
 
     tokens = [tok.text.lower() for tok in spacy_de.tokenizer(SAMPLE_DE)]
     print(f"Source tokens: {tokens}")
